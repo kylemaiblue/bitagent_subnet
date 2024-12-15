@@ -5,7 +5,7 @@ from datasets import load_dataset, load_from_disk
 from huggingface_hub import snapshot_download
 
 class ShuffledJSONDatasetIterator:
-    def __init__(self):
+    def __init__(self, shuffle: bool = True):
         dataframes = []
 
         # TODO - other BFCL task types:
@@ -25,7 +25,14 @@ class ShuffledJSONDatasetIterator:
             df_data['ground_truth'] = df_answer['ground_truth']
             dataframes.append(df_data[['id','question','function','ground_truth']])
         self.all_data = pd.concat(dataframes)
-        self._shuffle_data()
+        if shuffle:
+            self._shuffle_data()
+    
+    def __len__(self):
+        return len(self.all_data)
+    
+    def __getitem__(self, index):
+        return self.all_data.iloc[index]
 
     def _shuffle_data(self):
         self.shuffled_data = self.all_data.sample(frac=1).reset_index(drop=True)
@@ -57,7 +64,7 @@ def huggingface_loader(dataset_name, root_data_dir="bitagent.data", split="train
     bt.logging.debug("Loaded.")
     return ds
 
-def load_bfcl_dataset(dataset_name, root_data_dir="bitagent.data", split="train", name=None):
+def load_bfcl_dataset(dataset_name, root_data_dir="bitagent.data", split="train", name=None, shuffle: bool = True):
     snapshot_download(repo_id=dataset_name, allow_patterns="*.json", repo_type="dataset", local_dir="bitagent.data/bfcl/")
 
-    return ShuffledJSONDatasetIterator()
+    return ShuffledJSONDatasetIterator(shuffle=shuffle)

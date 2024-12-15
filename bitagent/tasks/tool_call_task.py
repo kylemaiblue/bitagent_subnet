@@ -24,6 +24,7 @@ from bitagent.schemas.chat import messages_to_list
 from bitagent.datasources.tools import ToolCallData
 from bitagent.helpers.tool_parsing import validate_tool_call, find_msgs_before_tool_call, find_first_tool_call
 from bitagent.criteria import default_criteria, tool_call_criteria, irrelevant_tool_call_criteria
+import traceback
 
 REWRITE_TOOL_USER_PROMPT = """You rewrite questions to make sense when paired with a function call. 
 The rewritten question will need to be changed to match the argument parameters and values relative to the function name.
@@ -42,9 +43,11 @@ class ToolCallTask(Task):
         desc: str = "",
         offline: bool = False,
         dname: str = "",
-        ds_index: int = -1
+        ds_index: int = -1,
+        data_mode: str = "random" # other kind: irrelevant_tool_call; tool_call
     ):
         super().__init__(name=name, desc=desc)
+        assert data_mode in ["irrelevant_tool_call", "tool_call", "random"]
         self.validator = validator
         self.timeout = 15.0
         self.name += " - Tool Call"
@@ -79,7 +82,13 @@ class ToolCallTask(Task):
 
                 # 75% of the time do a tool call task with a relevant tool, other times do a tool call with no valid tool option
                 # irrelevant tool call
-                if "is_ground_truth" not in expected_tool_call_message and bool(random.random() < 0.25) and len(tools) > 1:
+                create_irrelevant_tool_call = False
+                if data_mode == "irrelevant_tool_call":
+                    create_irrelevant_tool_call = True
+                elif data_mode == "random":
+                    create_irrelevant_tool_call = bool(random.random() < 0.25)
+    
+                if "is_ground_truth" not in expected_tool_call_message and create_irrelevant_tool_call and len(tools) > 1 :
                     # remove the real tool
                     expected_tool_call_message_json = json.loads(expected_tool_call_message)
                     if isinstance(expected_tool_call_message_json, str):
@@ -90,6 +99,7 @@ class ToolCallTask(Task):
                 break
 
             except Exception as e:
+                traceback.print_exc()
                 bt.logging.debug(f'Exception getting new task - {e} - you may need to CHECK YOUR vLLM docker instance')
                 pass
         if not messages:
@@ -111,7 +121,16 @@ class ToolCallTask(Task):
         # increase number of tools
         for _ in range(random.randint(2,4)):
             # filter out the tools by name that are already in the data.tools
-            new_tools = [t for t in next(self.validator.tool_dataset).tools if t.name not in [dt.name for dt in data.tools]]
+            if ds_index == -1:
+                new_tools = [t for t in next(self.validator.tool_dataset).tools if t.name not in [dt.name for dt in data.tools]]
+            else:
+                max_index = self.validator.tool_dataset.get_ds_size_of_dname(dname)
+                for i in range(100):
+                    n_index = random.randint(0, max_index - 1)
+                    next_data = self.validator.tool_dataset.__next_ds__(dname, n_index)
+                    if next_data is not None:
+                        new_tools = [t for t in next_data.tools if t.name not in [dt.name for dt in data.tools]]
+                        break
             data.tools = data.tools + new_tools
         
         # remove all the messages after the first tool call, keeping the assistant

@@ -29,9 +29,9 @@ class SimulateValidator:
         llm_name: str = "thesven/Mistral-7B-Instruct-v0.3-GPTQ",
         base_url: str = "http://localhost:30000/v1",
         validator_hf_server_port: int = 8000,
+        shuffle_data: bool = True,
     ):
-        self.tool_dataset = ToolDataset()
-        self.tool_dataset = ToolDataset()
+        self.tool_dataset = ToolDataset(shuffle=shuffle_data)
         # bt.logging.debug("Initializing Validator - this may take a while (downloading data and models) - loading model ...")
         self.sentence_transformer = CachedSentenceTransformer("BAAI/bge-small-en-v1.5")
 
@@ -228,7 +228,7 @@ def dump_task_to_json(task: ToolCallTask) -> Dict:
     for criterion in criteria:
         if criterion.name == "Return correct function name":
             ground_truth = criterion.eval_args
-            print("ground_truth: ", ground_truth)
+            #print("ground_truth: ", ground_truth)
             break
 
     record = {

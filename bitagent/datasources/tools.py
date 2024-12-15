@@ -9,7 +9,7 @@ from bitagent.schemas.tool import Tool
 from bitagent.schemas.chat import ChatMessage, messages_from_list
 from bitagent.datasources.loaders import huggingface_loader, load_bfcl_dataset
 from bitagent.helpers.string_parse import parse_multiple_space_sep_json
-
+import traceback
 
 def split_dialogue(text) -> List[ChatMessage]:
     # Define a pattern to match the roles and capture messages
@@ -113,21 +113,43 @@ def add_extra_arguments(tool_call: Dict[str, Any], tools: List[Tool]):
             break
 
 class ToolDataset(Iterator):
-    def __init__(self):
+    def __init__(self, shuffle: bool = True):
         super().__init__()
         seed = random.randint(0, 10000)
-        glaive_ds = huggingface_loader("glaiveai/glaive-function-calling-v2")
-        bitagent_ds = huggingface_loader("BitAgent/tool_calling")
-        bfcl_ds = load_bfcl_dataset("gorilla-llm/Berkeley-Function-Calling-Leaderboard")
-
+        self.glaive_ds = huggingface_loader("glaiveai/glaive-function-calling-v2")
+        self.bitagent_ds = huggingface_loader("BitAgent/tool_calling")
+        self.bfcl_ds = load_bfcl_dataset("gorilla-llm/Berkeley-Function-Calling-Leaderboard", shuffle=shuffle)
         self.datasets = {
-            "glaive": iter(glaive_ds.shuffle(seed=seed)),
-            "bitagent": iter(bitagent_ds.shuffle(seed=seed)),
-            "bfcl": iter(bfcl_ds),
+                "glaive": iter(self.glaive_ds.shuffle(seed=seed) if shuffle else self.glaive_ds),
+                "bitagent": iter(self.bitagent_ds.shuffle(seed=seed) if shuffle else self.bitagent_ds),
+                "bfcl": iter(self.bfcl_ds),
+            }
+            
+    
+    def get_ds_item(self, dname: str, index: int) -> Dict:
+        if dname == "bfcl":
+            return self.bfcl_ds[index]
+        if dname == "glaive":
+            return self.glaive_ds[index]
+        if dname == "bitagent":
+            return self.bitagent_ds[index]
+        raise ValueError(f"Dataset {dname} is not supported")
+
+    def get_ds_size(self) -> Dict[str, int]:
+        return {
+            "bfcl": len(self.bfcl_ds),
+            "glaive": len(self.glaive_ds),
+            "bitagent": len(self.bitagent_ds),
         }
     
-    def get_ds_size(self) -> Dict[str, int]:
-        return {dname: len(list(ds)) for dname, ds in self.datasets.items()}
+    def get_ds_size_of_dname(self, dname: str) -> int:
+        if dname == "bfcl":
+            return len(self.bfcl_ds)
+        if dname == "glaive":
+            return len(self.glaive_ds)
+        if dname == "bitagent":
+            return len(self.bitagent_ds)
+        raise ValueError(f"Dataset {dname} is not supported")
     
     def __next__(self) -> ToolCallData:
         return self.__next_ds__()
@@ -145,11 +167,14 @@ class ToolDataset(Iterator):
                 if ds_index == -1:
                     data = next(ds)
                 else:
-                    data = ds[ds_index]
-                    
+                    data = self.get_ds_item(dname, ds_index)
+
                 if dname == "glaive":
                     system_prompt = data["system"].replace("SYSTEM: ", "")
                     if "following functions" not in system_prompt:
+                        print("cannot find following functions")
+                        if ds_index != -1:
+                            return None
                         continue
 
                     chat_history = clean_text(data["chat"])
@@ -205,5 +230,5 @@ class ToolDataset(Iterator):
                     return ToolCallData(messages=messages, tools=tools, source="bfcl")
                     
             except Exception as e:
-                #bt.logging.debug(f"Issue getting tool call from dataset ... {e}")
+                traceback.print_exc()
                 pass
