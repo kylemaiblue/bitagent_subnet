@@ -50,6 +50,7 @@ class ToolCallTask(Task):
         self.name += " - Tool Call"
         self.weight = TASK_WEIGHTS["tool_call"]
         self.source = "unknown"
+        self.original_user = ""
 
         if offline:
             self.mode = "offline"
@@ -58,6 +59,7 @@ class ToolCallTask(Task):
             try:
                 messages, tools, data = self.generate_task_data(dname, ds_index)
                 self.source = data.source
+                self.original_user = data.original_content
                 expected_messages = messages_to_list(data.messages)
                 expected_tool_call_messages = [em for em in expected_messages if em['role'] == 'tool call']
                 if messages[0].role == 'system':
