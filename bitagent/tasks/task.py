@@ -29,6 +29,7 @@ from bitagent.schemas.chat import ChatMessage, messages_to_list
 class Task():
     criteria: List[Criterion]
     synapse: QueryTask
+    source: str = "unknown"
 
     def __init__(self, 
                  name: str, 

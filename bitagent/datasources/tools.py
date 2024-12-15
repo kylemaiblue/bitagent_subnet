@@ -77,6 +77,8 @@ def json_schema_to_pydantic_tool(schema: dict) -> Tool:
 class ToolCallData(BaseModel):
     messages: List[ChatMessage]
     tools: list[Tool]
+    source: str = "unknown"
+    original_content: str = ""
 
 TYPES = ["str", "int", "dict", "list", "float", "bool", "string", "integer", "number", "boolean", "dictionary", "object"]
 
@@ -123,15 +125,28 @@ class ToolDataset(Iterator):
             "bitagent": iter(bitagent_ds.shuffle(seed=seed)),
             "bfcl": iter(bfcl_ds),
         }
-
+    
+    def get_ds_size(self) -> Dict[str, int]:
+        return {dname: len(list(ds)) for dname, ds in self.datasets.items()}
+    
     def __next__(self) -> ToolCallData:
+        return self.__next_ds__()
+
+    def __next_ds__(self, dname: str = "", ds_index: int = -1) -> ToolCallData:
         #bt.logging.debug("Retrieving function call data from dataset...")
         count = 0
         while count < 25:
             count += 1
             try:
-                dname, ds = random.choices(list(self.datasets.items()), [5, 5, 10])[0]
-                data = next(ds)
+                if len(dname) == 0:
+                    dname, ds = random.choices(list(self.datasets.items()), [5, 5, 10])[0]
+                else:
+                    ds = self.datasets[dname]
+                if ds_index == -1:
+                    data = next(ds)
+                else:
+                    data = ds[ds_index]
+                    
                 if dname == "glaive":
                     system_prompt = data["system"].replace("SYSTEM: ", "")
                     if "following functions" not in system_prompt:
@@ -159,7 +174,7 @@ class ToolDataset(Iterator):
                             add_extra_arguments(tool_call, tools) 
 
                     
-                    return ToolCallData(messages=messages, tools=tools)
+                    return ToolCallData(messages=messages, tools=tools, source="glaive")
                 elif dname == "bitagent":
                     for key, value in data.items():
                         if isinstance(value, str):
@@ -178,7 +193,7 @@ class ToolDataset(Iterator):
                         for arg_name, arg_value in tool.arguments.items():
                             if arg_value["type"] not in TYPES:
                                 raise ValueError(f"Inavlid type used type: {arg_value['type']}")
-                    return ToolCallData(messages=messages, tools=tools)
+                    return ToolCallData(messages=messages, tools=tools, source="bitagent")
                 elif dname == "bfcl":
                     messages = messages_from_list(data["question"][0])
                     ground_truth = data['ground_truth'][0]
@@ -187,7 +202,7 @@ class ToolDataset(Iterator):
                                                          "name": list(ground_truth.keys())[0], 
                                                          "arguments": list(ground_truth.values())[0]}))
                     tools = [json_schema_to_pydantic_tool(tool) for tool in data["function"]]
-                    return ToolCallData(messages=messages, tools=tools)
+                    return ToolCallData(messages=messages, tools=tools, source="bfcl")
                     
             except Exception as e:
                 #bt.logging.debug(f"Issue getting tool call from dataset ... {e}")

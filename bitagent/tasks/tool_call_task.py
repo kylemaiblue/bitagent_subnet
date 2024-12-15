@@ -41,19 +41,23 @@ class ToolCallTask(Task):
         name: str,
         desc: str = "",
         offline: bool = False,
+        dname: str = "",
+        ds_index: int = -1
     ):
         super().__init__(name=name, desc=desc)
         self.validator = validator
         self.timeout = 15.0
         self.name += " - Tool Call"
         self.weight = TASK_WEIGHTS["tool_call"]
+        self.source = "unknown"
 
         if offline:
             self.mode = "offline"
         messages = None
         for _ in range(10):
             try:
-                messages, tools, data = self.generate_task_data()
+                messages, tools, data = self.generate_task_data(dname, ds_index)
+                self.source = data.source
                 expected_messages = messages_to_list(data.messages)
                 expected_tool_call_messages = [em for em in expected_messages if em['role'] == 'tool call']
                 if messages[0].role == 'system':
@@ -91,8 +95,11 @@ class ToolCallTask(Task):
         self.messages = messages
         self.synapse = QueryTask(messages=messages, tools=tools)
     
-    def generate_task_data(self) -> ToolCallData:
-        data: ToolCallData = next(self.validator.tool_dataset)
+    def generate_task_data(self, dname: str = "", ds_index: int = -1) -> ToolCallData:
+        if dname == "" and ds_index == -1:
+            data: ToolCallData = next(self.validator.tool_dataset)
+        else:
+            data: ToolCallData = self.validator.tool_dataset.__next_ds__(dname, ds_index)
 
         tool_call = find_first_tool_call(data.messages)
         if not tool_call:
@@ -160,7 +167,7 @@ class ToolCallTask(Task):
                 
                 data.messages[0].content = new_user
 
-                data = ToolCallData(messages=data.messages, tools=data.tools)
+                data = ToolCallData(messages=data.messages, tools=data.tools, source=data.source, original_content=user)
                 messages_before_call = find_msgs_before_tool_call(data.messages)
                 
             else:
