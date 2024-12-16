@@ -44,7 +44,8 @@ class ToolCallTask(Task):
         offline: bool = False,
         dname: str = "",
         ds_index: int = -1,
-        data_mode: str = "random" # other kind: irrelevant_tool_call; tool_call
+        data_mode: str = "random", # other kind: irrelevant_tool_call; tool_call
+        rewrite: bool = True
     ):
         super().__init__(name=name, desc=desc)
         assert data_mode in ["irrelevant_tool_call", "tool_call", "random"]
@@ -60,18 +61,22 @@ class ToolCallTask(Task):
         messages = None
         for _ in range(10):
             try:
-                messages, tools, data = self.generate_task_data(dname, ds_index)
+                messages, tools, data = self.generate_task_data(dname, ds_index, rewrite)
                 self.source = data.source
                 self.original_user = data.original_content
                 expected_messages = messages_to_list(data.messages)
                 expected_tool_call_messages = [em for em in expected_messages if em['role'] == 'tool call']
                 if messages[0].role == 'system':
                     # try again - skip tasks with system prompts
+                    if ds_index != -1:
+                        raise Exception(f"contain system message, so we ignore it")
                     continue
                 if len(expected_tool_call_messages) > 0:
                     expected_tool_call_message = expected_tool_call_messages[0]['content']
                 else:
                     #bt.logging.debug(f"Skipping - no tool call message found in expected messages: {expected_messages}")
+                    if ds_index != -1:
+                        raise Exception(f"len(expected_tool_call_messages) == 0, so we ignore it")
                     continue
 
                 if type(expected_tool_call_message) == str:
@@ -107,7 +112,7 @@ class ToolCallTask(Task):
         self.messages = messages
         self.synapse = QueryTask(messages=messages, tools=tools)
     
-    def generate_task_data(self, dname: str = "", ds_index: int = -1) -> ToolCallData:
+    def generate_task_data(self, dname: str = "", ds_index: int = -1, rewrite: bool = True) -> ToolCallData:
         if dname == "" and ds_index == -1:
             data: ToolCallData = next(self.validator.tool_dataset)
         else:
@@ -180,11 +185,13 @@ class ToolCallTask(Task):
                     bt.logging.error(f'An error occured while rewriting the tool call {e} - you may need to CHECK YOUR vLLM docker instance')
                     count = 11
                     continue
-
-                rw_prompt = REWRITE_TOOL_USER_PROMPT.format(tool_call=new_tool_call, user=user)
-                new_user = self.validator.llm([{"role": "user", "content": rw_prompt}], max_new_tokens=1000, temperature=1)
-                if not self.check_rewrite_alignment(new_user, user):
-                    raise Exception(f"User rewrite is not in alignment\nOriginal: {user}\n Rewrite: {new_user}")
+                if rewrite:
+                    rw_prompt = REWRITE_TOOL_USER_PROMPT.format(tool_call=new_tool_call, user=user)
+                    new_user = self.validator.llm([{"role": "user", "content": rw_prompt}], max_new_tokens=1000, temperature=1)
+                    if not self.check_rewrite_alignment(new_user, user):
+                        raise Exception(f"User rewrite is not in alignment\nOriginal: {user}\n Rewrite: {new_user}")
+                else: # keep original user
+                    new_user = user
                 
                 data.messages[0].content = new_user
 

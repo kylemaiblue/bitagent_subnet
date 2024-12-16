@@ -6,10 +6,12 @@ import typer
 import datetime
 import traceback
 from gen_utils import LLMTask
+import random
 
 
 def main(
-    dataset: str = "bfcl",
+    dataset: str,
+    save_folder: str,
     size: int = -1,
     thread_count: int = 5,
     from_scratch: bool = False,
@@ -17,18 +19,22 @@ def main(
     start_index: int = 0,
     end_index: int = -1,
     port: int = 30000,
+    rewrite_ratio: float = 1.0,
 ):
     assert dataset in ["bfcl", "glaive", "bitagent"]
+    print("start generating data")
     validator = SimulateValidator(
         shuffle_data=False, base_url=f"http://localhost:{port}/v1"
     )
+    
     ds_size_dic = validator.tool_dataset.get_ds_size()
     print("ds_size_dic: ", ds_size_dic)
     dataset_size = ds_size_dic[dataset]
     if end_index == -1:
         end_index = dataset_size
     
-    save_path = f"extracted_data/all_data/{dataset}_{start_index}_{end_index}.jsonl"
+    save_path = f"{save_folder}/{dataset}_{start_index}_{end_index}.jsonl"
+    print('save_path: ', save_path)
     task = LLMTask(
         inputs=[i for i in range(start_index, end_index)],
         save_path=save_path,
@@ -45,13 +51,14 @@ def main(
                 dname=dataset,
                 ds_index=index,
                 data_mode=data_mode,
+                rewrite=rewrite_ratio > random.random(),    
             )
             dumped_data = dump_task_to_json(task)
             result = dumped_data
             result["index"] = index
             result["dataset"] = dataset
         except Exception as e:
-            traceback.print_exc()
+            #traceback.print_exc()
             print(f"Error: {e}")
             result.update(
                 {
