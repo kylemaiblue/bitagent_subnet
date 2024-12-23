@@ -9,6 +9,18 @@ from gen_utils import LLMTask
 import random
 
 
+def read_indices_to_generate(path: str):
+    with open(path, "r") as f:
+        items = [json.loads(line) for line in f.readlines()]
+    indices = []
+    for item in items:
+        grp_indices = item["group_indices"]
+        index = random.choice(grp_indices)
+        assert index not in indices, f"duplicate index: {index}"
+        indices.append(index)
+    return indices
+
+
 def main(
     dataset: str,
     save_folder: str,
@@ -18,10 +30,14 @@ def main(
     data_mode: str = "tool_call",
     start_index: int = 0,
     end_index: int = -1,
+    gen_more_data_path: str = "",
     port: int = 30000,
     rewrite_ratio: float = 1.0,
 ):
     assert dataset in ["bfcl", "glaive", "bitagent"]
+    if gen_more_data_path:
+        print("do not generate data by index, use the data in the file")
+        
     print("start generating data")
     validator = SimulateValidator(
         shuffle_data=False, base_url=f"http://localhost:{port}/v1"
@@ -33,10 +49,16 @@ def main(
     if end_index == -1:
         end_index = dataset_size
     
-    save_path = f"{save_folder}/{dataset}_{start_index}_{end_index}.jsonl"
+    if gen_more_data_path:
+        input_indices = read_indices_to_generate(gen_more_data_path)
+        print(f"Generate {len(input_indices)} data points from the file {gen_more_data_path}")
+    else:
+        input_indices = [i for i in range(start_index, end_index)]
+    
+    save_path = f"{save_folder}/gen_more_data_indices_{len(input_indices)}.jsonl"
     print('save_path: ', save_path)
     task = LLMTask(
-        inputs=[i for i in range(start_index, end_index)],
+        inputs=input_indices,
         save_path=save_path,
         size=size,
         from_scratch=from_scratch,
