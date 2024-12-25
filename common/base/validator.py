@@ -25,12 +25,10 @@ import bittensor as bt
 from datetime import datetime, timezone
 from common.utils.uids import get_alive_uids
 from bitagent.validator.constants import DEPLOYED_DATE, COMPETITION_LENGTH_DAYS, TESTNET_COMPETITION_LENGTH_DAYS, COMPETITION_PREFIX, COMPETITION_PREVIOUS_PREFIX
-
 from common.utils.weight_utils import (
     process_weights_for_netuid,
     convert_weights_and_uids_for_emit,
 )
-
 from typing import List
 from traceback import print_exception
 
@@ -62,7 +60,7 @@ class BaseValidatorNeuron(BaseNeuron):
         self.offline_model_names = {}
         self.running_offline_mode = False
         self.offline_status = None
-        self.regrade_version = 1012
+        self.regrade_version = 1023
         self.update_competition_numbers()
 
         self.state_file_name = "ft_state.npz"
@@ -254,12 +252,18 @@ class BaseValidatorNeuron(BaseNeuron):
             bt.logging.warning(
                 f"Scores contain NaN values. This may be due to a lack of responses from miners, or a bug in your reward functions."
             )
-         
-        fit_curve = True
+        # correct validator scores to be 0 
+        for uid, hotkey in enumerate(self.hotkeys):
+            if not check_uid_availability(self.metagraph, uid, self.config.neuron.vpermit_tao_limit): 
+                # if validator, set validators scores to 0
+                self.scores[uid] = 0 
+                self.offline_scores[self.previous_competition_version][uid] = 0
+                self.offline_scores[self.competition_version][uid] = 0
+                self.offline_miners_scored[self.competition_version][self.regrade_version].append(uid)
+                self.offline_model_names[self.competition_version][uid] = ""
 
-        weighted_scores = self.scores.copy()
-        if fit_curve:
-            weighted_scores = self.get_weighted_scores()
+        # always fit scores to weighted curve
+        weighted_scores = self.get_weighted_scores()
 
         # Calculate the average reward for each uid across non-zero values.
         # Replace any NaN values with 0.
@@ -317,7 +321,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # scores are largely based on PREVIOUS competition scores
         scaled_scores = ((0.2 * self.scores) + (0.8 * self.offline_scores[self.previous_competition_version])) * 5
         exp_scores = np.exp(scaled_scores)
-        return exp_scores / np.sum(exp_scores)
+        return exp_scores / np.sum(exp_scores)    
 
     def resync_metagraph(self):
         """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""
@@ -347,13 +351,8 @@ class BaseValidatorNeuron(BaseNeuron):
                     if uid in self.offline_miners_scored[self.competition_version][self.regrade_version]:
                         self.offline_miners_scored[self.competition_version][self.regrade_version].remove(uid)
                     self.offline_model_names[self.competition_version][uid] = ""
-                if not check_uid_availability(self.metagraph, uid, self.config.neuron.vpermit_tao_limit): 
-                    # if validator, set validators scores to 0
-                    self.scores[uid] = 0 
-                    self.offline_scores[self.previous_competition_version][uid] = 0
-                    self.offline_scores[self.competition_version][uid] = 0
-                    self.offline_miners_scored[self.competition_version][self.regrade_version].append(uid)
-                    self.offline_model_names[self.competition_version][uid] = ""
+                    self.offline_model_names[self.previous_competition_version][uid] = ""
+
             # Check to see if the metagraph has changed size.
             # If so, we need to add new hotkeys and moving averages.
             if len(self.hotkeys) < len(self.metagraph.hotkeys):
@@ -497,7 +496,7 @@ class BaseValidatorNeuron(BaseNeuron):
                 bt.logging.debug(f"OFFLINE TESTNET: using {TESTNET_COMPETITION_LENGTH_DAYS} days per competition")
                 number_of_competitions_since_start = int(number_of_days_since_start / TESTNET_COMPETITION_LENGTH_DAYS)
 
-            bt.logging.debug(f"OFFLINE: number_of_competitions_since_start: {number_of_competitions_since_start}")
+            #bt.logging.debug(f"OFFLINE: number_of_competitions_since_start: {number_of_competitions_since_start}")
 
             if number_of_competitions_since_start < 1:
                 # we have not completed any competitions with this prefix, so the previous competition number is the last one we completed with the old prefix
@@ -540,19 +539,30 @@ class BaseValidatorNeuron(BaseNeuron):
             # so clear out the offline_miners_scored for this competition, for those miners
             for uid in self.offline_miners_scored[self.competition_version][self.regrade_version]:
                 if self.offline_scores[self.competition_version][uid] <= 0.01: # little wiggle room
-                    bt.logging.debug(f"OFFLINE: removing miner {uid} from offline_miners_scored for competition {self.competition_version} because score is less than 0.01")
-                    if uid in self.offline_miners_scored[self.competition_version][self.regrade_version]:
-                        self.offline_miners_scored[self.competition_version][self.regrade_version].remove(uid)
+                    #bt.logging.debug(f"OFFLINE: removing miner {uid} from offline_miners_scored for competition {self.competition_version} because score is less than 0.01")
+                    self.offline_miners_scored[self.competition_version][self.regrade_version].remove(uid)
 
+            # add all miners that are alive and not already scored to the list of miners left to score
             for uid in get_alive_uids(self):
                 if uid not in [int(x) for x in self.offline_miners_scored[self.competition_version][self.regrade_version]]:
                     self.miners_left_to_score.append(int(uid))
-            
+
+            # if a regrade has been set for the comp, then reset the scores for the miners
+            #bt.logging.debug(f"OFFLINE: regrade version: {self.regrade_version}")
+            #bt.logging.debug(f"OFFLINE: regrade check - offline miners scored: {self.offline_miners_scored[self.competition_version][self.regrade_version]}")
+            #bt.logging.debug(f"OFFLINE: regrade check - offline scores: {self.offline_scores[self.competition_version]}")
+            for uid,score in enumerate(self.offline_scores[self.competition_version]):
+                #bt.logging.debug(f"OFFLINE: regrade check for uid: {uid}")
+                if score > 0.0 and uid not in [int(x) for x in self.offline_miners_scored[self.competition_version][self.regrade_version]]:
+                    #bt.logging.debug(f"OFFLINE: resetting miner {uid}'s score for competition {self.competition_version} for regrade")
+                    self.offline_scores[self.competition_version][uid] = 0.0
+                #bt.logging.debug(f"OFFLINE: regrade check for uid done: {uid}")
+
             # if number of keys in offline_scores is greater than 5, we need to delete the oldest one
-            if len(self.offline_scores.keys()) > 6:
-                oldest_key = list(self.offline_scores.keys())[0]
-                del self.offline_scores[oldest_key]
-                del self.offline_miners_scored[oldest_key]
-                del self.offline_model_names[oldest_key]
+            # if len(self.offline_scores.keys()) > 6:
+            #     oldest_key = list(self.offline_scores.keys())[0]
+            #     del self.offline_scores[oldest_key]
+            #     del self.offline_miners_scored[oldest_key]
+            #     del self.offline_model_names[oldest_key]
         except Exception as e:
             bt.logging.error(f"Error updating competition numbers: {e}")
