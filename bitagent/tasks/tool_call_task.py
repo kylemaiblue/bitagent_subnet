@@ -55,6 +55,7 @@ class ToolCallTask(Task):
         self.weight = TASK_WEIGHTS["tool_call"]
         self.source = "unknown"
         self.original_user = ""
+        self.irrelevant = False # whether the tool call is irrelevant
 
         if offline:
             self.mode = "offline"
@@ -100,6 +101,7 @@ class ToolCallTask(Task):
                         expected_tool_call_message_json = json.loads(expected_tool_call_message_json)
                     tools = [t for t in tools if t.name != expected_tool_call_message_json['name']]
                     self.criteria = default_criteria + irrelevant_tool_call_criteria()
+                    self.irrelevant = True
 
                 break
 

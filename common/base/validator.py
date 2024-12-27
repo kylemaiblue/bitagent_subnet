@@ -517,11 +517,11 @@ class BaseValidatorNeuron(BaseNeuron):
             self.competition_version = f"{COMPETITION_PREFIX}-{int(number_of_competitions_since_start)}"
 
             if self.offline_scores.get(self.competition_version) is None:
-                self.offline_scores[self.competition_version] = np.zeros(self.metagraph.n, dtype=np.float32)
+                self.offline_scores[self.competition_version] = np.zeros(self.metagraph.n, dtype=np.float32) # a list of floats
 
             # SETUP OFFLINE MINERS SCORED
             if self.offline_miners_scored.get(self.competition_version) is None:
-                self.offline_miners_scored[self.competition_version] = {}
+                self.offline_miners_scored[self.competition_version] = {} # mapping from uid -> score
 
             if not isinstance(self.offline_miners_scored[self.competition_version], dict):
                 self.offline_miners_scored[self.competition_version] = {}
@@ -543,6 +543,7 @@ class BaseValidatorNeuron(BaseNeuron):
                     self.offline_miners_scored[self.competition_version][self.regrade_version].remove(uid)
 
             # add all miners that are alive and not already scored to the list of miners left to score
+            # SO if a miner was scored, then I will not be scored again ? even the HF model was changed?
             for uid in get_alive_uids(self):
                 if uid not in [int(x) for x in self.offline_miners_scored[self.competition_version][self.regrade_version]]:
                     self.miners_left_to_score.append(int(uid))

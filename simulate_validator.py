@@ -237,6 +237,7 @@ def dump_task_to_json(task: ToolCallTask) -> Dict:
         "original_user": task.original_user,
         "ground_truth": ground_truth,
         "source": task.source,
+        "irrelevant": task.irrelevant,
     }
     return record
 
