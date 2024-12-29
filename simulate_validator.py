@@ -9,13 +9,40 @@ from bitagent.helpers.llms import llm
 import asyncio
 import traceback
 import re
-from typing import Dict
+from typing import Dict, Any
 import typer
 import json
 from colorama import Fore, Style, init
-
+from bitagent.tasks.task import Task
+from bitagent.tasks.constants import TASK_WEIGHTS
+from bitagent.schemas.chat import ChatMessage
+from bitagent.schemas.tool import Tool
+from bitagent.protocol import QueryTask
+from bitagent.criteria import default_criteria, tool_call_criteria, irrelevant_tool_call_criteria
 init()
 
+
+class SimulatedTask(Task):
+    def __init__(self, validator: Any, data: Dict):
+        super().__init__(name="Responds with correct function call")
+        self.mode = "offline"
+        self.validator = validator
+        self.timeout = 15.0
+        self.name += " - Tool Call"
+        self.weight = TASK_WEIGHTS["tool_call"]
+        self.source = data["source"]
+        self.original_user = data["original_user"]
+        self.irrelevant = data["irrelevant"]
+        
+        tools = [Tool(**tool) for tool in data["tools"]]
+        messages = [ChatMessage(**message) for message in data["messages"]]
+        ground_truth = data["ground_truth"]
+        self.messages = messages
+        self.synapse = QueryTask(messages=messages, tools=tools)
+        if self.irrelevant:
+            self.criteria = default_criteria + irrelevant_tool_call_criteria()
+        else:
+            self.criteria = default_criteria + tool_call_criteria(expected_response=ground_truth[0])
 
 class ValidatorConfig:
     def __init__(self):
@@ -78,6 +105,7 @@ async def run_evaluation(
     eval_model_name: str,
     gen_model_name: str = "thesven/Mistral-7B-Instruct-v0.3-GPTQ",
     gen_base_url: str = "http://localhost:30000/v1",
+    data_path: str = "",
     eval_model_port: int = 8000,
     num_tasks: int = 4,
     batch_size: int = 2,
@@ -127,12 +155,18 @@ async def run_evaluation(
             # time.sleep(25)
             return None
 
-    tasks = []
-
-    for i, _ in enumerate(range(0, num_tasks, batch_size)):
-        for i in range(batch_size):
-            tasks.append(get_random_task(validator, offline=True))
-
+    if not data_path:
+        print(f"data_path is empty, generating {num_tasks} tasks")
+        tasks = []
+        for i, _ in enumerate(range(0, num_tasks, batch_size)):
+            for i in range(batch_size):
+                tasks.append(get_random_task(validator, offline=True))
+    else:
+        with open(data_path, "r") as f:
+            file_tasks = json.load(f)
+            tasks = [SimulatedTask(validator, task) for task in file_tasks]
+            print(f"loaded {len(tasks)} tasks from {data_path}")
+            
     log_results = [dump_task_to_json(task) for task in tasks]
 
     print(f"Generated {len(tasks)} tasks")
