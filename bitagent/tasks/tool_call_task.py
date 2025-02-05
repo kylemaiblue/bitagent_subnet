@@ -16,11 +16,14 @@
 import ast
 import json
 import random
+import datetime
 import bittensor as bt
+from huggingface_hub import dataset_info
 from bitagent.protocol import QueryTask
 from bitagent.tasks import Task
 from bitagent.tasks import TASK_WEIGHTS
 from bitagent.schemas.chat import messages_to_list
+from bitagent.datasources.tools import ToolDataset
 from bitagent.datasources.tools import ToolCallData
 from bitagent.helpers.tool_parsing import validate_tool_call, find_msgs_before_tool_call, find_first_tool_call
 from bitagent.criteria import default_criteria, tool_call_criteria, irrelevant_tool_call_criteria
@@ -113,13 +116,33 @@ class ToolCallTask(Task):
             raise Exception(f"Failed to generate task data 10 times")
         self.messages = messages
         self.synapse = QueryTask(messages=messages, tools=tools)
-    
+
+
+    def tool_dataset_regen(self):
+        today = datetime.date.today().strftime("%Y%m%d")
+
+        if self.validator.check_date != today:
+            self.validator.check_date = today
+            mod_date = dataset_info("BitAgent/tool_calling_shuffle").last_modified.strftime("%Y%m%d")
+            bt.logging.debug("Checked for dataset regen, data has not been updated.")
+            if mod_date != self.validator.regrade_version:
+                self.validator.tool_dataset = ToolDataset()
+                self.validator.regrade_version = mod_date
+                bt.logging.debug("Data regenerated.")
+        else:
+            return
+
+
     def generate_task_data(self, dname: str = "", ds_index: int = -1, rewrite: bool = True) -> ToolCallData:
+        
+        self.tool_dataset_regen()
+        
         if dname == "" and ds_index == -1:
             data: ToolCallData = next(self.validator.tool_dataset)
         else:
             data: ToolCallData = self.validator.tool_dataset.__next_ds__(dname, ds_index)
 
+        
         tool_call = find_first_tool_call(data.messages)
         if not tool_call:
             # no tool call in the messages, so skip
@@ -187,15 +210,13 @@ class ToolCallTask(Task):
                     bt.logging.error(f'An error occured while rewriting the tool call {e} - you may need to CHECK YOUR vLLM docker instance')
                     count = 11
                     continue
-                if rewrite:
-                    rw_prompt = REWRITE_TOOL_USER_PROMPT.format(tool_call=new_tool_call, user=user)
-                    new_user = self.validator.llm([{"role": "user", "content": rw_prompt}], max_new_tokens=1000, temperature=1)
-                    if not self.check_rewrite_alignment(new_user, user):
-                        raise Exception(f"User rewrite is not in alignment\nOriginal: {user}\n Rewrite: {new_user}")
-                else: # keep original user
-                    new_user = user
+
+                # rw_prompt = REWRITE_TOOL_USER_PROMPT.format(tool_call=new_tool_call, user=user)
+                # new_user = self.validator.llm([{"role": "user", "content": rw_prompt}], max_new_tokens=1000, temperature=1)
+                # if not self.check_rewrite_alignment(new_user, user):
+                #     raise Exception(f"User rewrite is not in alignment\nOriginal: {user}\n Rewrite: {new_user}")
                 
-                data.messages[0].content = new_user
+                data.messages[0].content = user
 
                 data = ToolCallData(messages=data.messages, tools=data.tools, source=data.source, original_content=user)
                 messages_before_call = find_msgs_before_tool_call(data.messages)

@@ -119,11 +119,15 @@ class ToolDataset(Iterator):
         self.glaive_ds = huggingface_loader("glaiveai/glaive-function-calling-v2")
         self.bitagent_ds = huggingface_loader("BitAgent/tool_calling")
         self.bfcl_ds = load_bfcl_dataset("gorilla-llm/Berkeley-Function-Calling-Leaderboard", shuffle=shuffle)
+        glaive_ds = huggingface_loader("glaiveai/glaive-function-calling-v2")
+        bitagent_ds = huggingface_loader("BitAgent/tool_calling_shuffle")
+        bfcl_ds = load_bfcl_dataset("gorilla-llm/Berkeley-Function-Calling-Leaderboard")
+
         self.datasets = {
-                "glaive": iter(self.glaive_ds.shuffle(seed=seed) if shuffle else self.glaive_ds),
-                "bitagent": iter(self.bitagent_ds.shuffle(seed=seed) if shuffle else self.bitagent_ds),
-                "bfcl": iter(self.bfcl_ds),
-            }
+            "glaive": iter(glaive_ds.shuffle(seed=seed)),
+            "bitagent": iter(bitagent_ds.shuffle(seed=seed)),
+            "bfcl": iter(bfcl_ds),
+        }
             
     
     def get_ds_item(self, dname: str, index: int) -> Dict:
@@ -161,7 +165,7 @@ class ToolDataset(Iterator):
             count += 1
             try:
                 if len(dname) == 0:
-                    dname, ds = random.choices(list(self.datasets.items()), [5, 5, 10])[0]
+                    dname, ds = random.choices(list(self.datasets.items()), [1, 20, 5])[0] # old is 5, 5, 10
                 else:
                     ds = self.datasets[dname]
                 if ds_index == -1:
@@ -169,6 +173,8 @@ class ToolDataset(Iterator):
                 else:
                     data = self.get_ds_item(dname, ds_index)
 
+                #dname, ds = random.choices(list(self.datasets.items()), [1, 20, 5])[0]
+                #data = next(ds)
                 if dname == "glaive":
                     system_prompt = data["system"].replace("SYSTEM: ", "")
                     if "following functions" not in system_prompt:
